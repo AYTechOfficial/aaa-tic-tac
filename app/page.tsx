@@ -1,607 +1,738 @@
-'use client';
+"use client";
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { Button, Card, Badge, EmptyState } from "@/components/ui";
 
-// --- Constants & Config ---
-const COLORS = {
-  background: '#0B0C10',
-  surface: '#1F2833',
-  primary: '#FF3E3E',
-  secondary: '#4ECDC4',
-  text: '#FFFFFF',
-  muted: '#A0AAB5',
-  border: '#2D3748',
-};
+// ─── Types ───────────────────────────────────────────────────────────────────
+type CellValue = "X" | "O" | null;
+type Board = CellValue[];
+type GameMode = "single" | "passplay";
+type Difficulty = "easy" | "medium" | "hard";
+type GameState = "playing" | "won" | "draw";
 
-const STORAGE_KEYS = {
-  MATCHES: 'gridstrike_matches',
-  STATS: 'gridstrike_stats',
-};
-
-const SPACING = 8;
-
-// --- Types ---
-type Player = 'X' | 'O' | null;
-type Winner = 'X' | 'O' | 'draw' | null;
-type Mode = 'pvp' | 'ai-easy' | 'ai-medium' | 'ai-hard';
-
-interface MatchRecord {
-  id: string;
-  mode: Mode;
-  winner: Winner;
-  moves_count: number;
-  duration_seconds: number;
-  created_at: string;
+interface Profile {
+  rewardsPoints: number;
+  unlockedThemes: string[];
+  currentTheme: string;
 }
 
-interface PlayerStats {
-  id: string;
-  wins: number;
-  losses: number;
-  draws: number;
-  current_streak: number;
-  best_streak: number;
-}
+// ─── Constants ───────────────────────────────────────────────────────────────
+const STORAGE_KEY = "lastmile:aaa-tic-tac:profiles";
 
-// --- Utilities ---
-const generateId = () => Math.random().toString(36).substr(2, 9);
-
-const loadFromStorage = <T,>(key: string, fallback: T): T => {
-  try {
-    const item = localStorage.getItem(key);
-    return item ? JSON.parse(item) : fallback;
-  } catch {
-    return fallback;
-  }
+const DEFAULT_PROFILE: Profile = {
+  rewardsPoints: 0,
+  unlockedThemes: [],
+  currentTheme: "",
 };
 
-const saveToStorage = (key: string, data: unknown) => {
+const WIN_LINES: number[][] = [
+  [0, 1, 2],
+  [3, 4, 5],
+  [6, 7, 8],
+  [0, 3, 6],
+  [1, 4, 7],
+  [2, 5, 8],
+  [0, 4, 8],
+  [2, 4, 6],
+];
+
+const THEMES = [
+  { id: "neon-highway", name: "Neon Highway", cost: 300, desc: "Glowing neon accents" },
+  { id: "midnight-drive", name: "Midnight Drive", cost: 500, desc: "Deep blue tones" },
+  { id: "desert-storm", name: "Desert Storm", cost: 700, desc: "Warm desert palette" },
+];
+
+// ─── Icons ───────────────────────────────────────────────────────────────────
+const TowTruckIcon = ({ size = 32 }: { size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 32 32"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+  >
+    <rect x="4" y="20" width="4" height="4" rx="1" fill="#4f8cff" />
+    <rect x="8" y="16" width="8" height="8" rx="1" fill="#4f8cff" />
+    <rect x="16" y="12" width="8" height="12" rx="1" fill="#4f8cff" />
+    <circle cx="6" cy="26" r="2" fill="#e6e9ef" />
+    <circle cx="20" cy="26" r="2" fill="#e6e9ef" />
+    <path d="M24 12 L28 8 V12 H24 Z" fill="#e6e9ef" />
+  </svg>
+);
+
+const ServiceSedanIcon = ({ size = 32 }: { size?: number }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 32 32"
+    fill="none"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+  >
+    <rect x="6" y="16" width="20" height="4" rx="1" fill="#4f8cff" />
+    <rect x="10" y="12" width="12" height="4" rx="1" fill="#4f8cff" />
+    <circle cx="10" cy="22" r="2" fill="#e6e9ef" />
+    <circle cx="22" cy="22" r="2" fill="#e6e9ef" />
+    <path d="M12 12 L14 8 H18 L20 12 H12 Z" fill="#e6e9ef" />
+  </svg>
+);
+
+// ─── Persistence ─────────────────────────────────────────────────────────────
+function loadProfile(): Profile {
   try {
-    localStorage.setItem(key, JSON.stringify(data));
-  } catch (error) {
-    if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-      // Fallback: clear oldest records
-      try {
-        const matches = loadFromStorage<MatchRecord[]>(STORAGE_KEYS.MATCHES, []);
-        if (matches.length > 0) {
-          matches.shift(); // Remove oldest
-          localStorage.setItem(STORAGE_KEYS.MATCHES, JSON.stringify(matches));
-          localStorage.setItem(key, JSON.stringify(data));
-        }
-      } catch (retryError) {
-        console.error('Failed to handle QuotaExceededError', retryError);
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Profile;
+      if (parsed && typeof parsed.rewardsPoints === "number") {
+        return parsed;
       }
     }
+  } catch {
+    // Storage corrupted — fall through to defaults
   }
-};
-
-// --- Audio Engine ---
-class AudioEngine {
-  private ctx: AudioContext | null = null;
-  private enabled: boolean = true;
-
-  init() {
-    if (!this.ctx) {
-      this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
-  }
-
-  playTone(freq: number, type: OscillatorType, duration: number, vol: number = 0.1) {
-    if (!this.enabled || !this.ctx) return;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = type;
-    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
-    gain.gain.setValueAtTime(vol, this.ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + duration);
-    osc.connect(gain);
-    gain.connect(this.ctx.destination);
-    osc.start();
-    osc.stop(this.ctx.currentTime + duration);
-  }
-
-  playPlace() { this.playTone(400, 'sine', 0.1, 0.05); }
-  playWin() { 
-    this.playTone(523.25, 'square', 0.1, 0.05);
-    setTimeout(() => this.playTone(659.25, 'square', 0.1, 0.05), 100);
-    setTimeout(() => this.playTone(783.99, 'square', 0.3, 0.05), 200);
-  }
-  playDraw() { this.playTone(300, 'triangle', 0.3, 0.05); }
-  playLoss() { this.playTone(200, 'sawtooth', 0.4, 0.05); }
+  return { ...DEFAULT_PROFILE };
 }
 
-const audio = new AudioEngine();
-
-// --- Particle System ---
-class ParticleSystem {
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
-  private particles: { x: number; y: number; vx: number; vy: number; life: number; color: string }[] = [];
-  private animId: number | null = null;
-  private onComplete?: () => void;
-
-  constructor(container: HTMLElement) {
-    this.canvas = document.createElement('canvas');
-    this.canvas.style.position = 'absolute';
-    this.canvas.style.top = '0';
-    this.canvas.style.left = '0';
-    this.canvas.style.pointerEvents = 'none';
-    this.canvas.width = container.offsetWidth;
-    this.canvas.height = container.offsetHeight;
-    container.appendChild(this.canvas);
-    this.ctx = this.canvas.getContext('2d')!;
+function saveProfile(profile: Profile): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+  } catch {
+    // Quota exceeded or private browsing — silently ignore
   }
+}
 
-  spawn(x: number, y: number, color: string, count: number = 30) {
-    for (let i = 0; i < count; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const speed = Math.random() * 4 + 1;
-      this.particles.push({
-        x,
-        y,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        life: 1.0,
-        color,
-      });
+// ─── Game Logic ──────────────────────────────────────────────────────────────
+function checkWinner(board: Board): { winner: CellValue; line: number[] | null } {
+  for (const line of WIN_LINES) {
+    const [a, b, c] = line;
+    if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+      return { winner: board[a], line };
     }
-    if (!this.animId) this.animate();
   }
+  return { winner: null, line: null };
+}
 
-  animate = () => {
-    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    this.particles.forEach((p, i) => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.life -= 0.02;
-      this.ctx.globalAlpha = p.life;
-      this.ctx.fillStyle = p.color;
-      this.ctx.beginPath();
-      this.ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-      this.ctx.fill();
-    });
-    this.particles = this.particles.filter(p => p.life > 0);
-    if (this.particles.length > 0) {
-      this.animId = requestAnimationFrame(this.animate);
+function isBoardFull(board: Board): boolean {
+  return board.every((c) => c !== null);
+}
+
+function getEmptyCells(board: Board): number[] {
+  const empty: number[] = [];
+  for (let i = 0; i < 9; i++) {
+    if (!board[i]) empty.push(i);
+  }
+  return empty;
+}
+
+function getRandomMove(board: Board): number {
+  const empty = getEmptyCells(board);
+  return empty[Math.floor(Math.random() * empty.length)];
+}
+
+function getBestMove(board: Board, player: CellValue): number {
+  const opponent = player === "X" ? "O" : "X";
+
+  function minimax(b: Board, depth: number, maximizing: boolean): number {
+    const result = checkWinner(b);
+    if (result.winner === player) return 10 - depth;
+    if (result.winner === opponent) return depth - 10;
+    if (isBoardFull(b)) return 0;
+
+    if (maximizing) {
+      let best = -Infinity;
+      for (let i = 0; i < 9; i++) {
+        if (!b[i]) {
+          b[i] = player;
+          best = Math.max(best, minimax(b, depth + 1, false));
+          b[i] = null;
+        }
+      }
+      return best;
     } else {
-      this.animId = null;
-      if (this.onComplete) this.onComplete();
+      let best = Infinity;
+      for (let i = 0; i < 9; i++) {
+        if (!b[i]) {
+          b[i] = opponent;
+          best = Math.min(best, minimax(b, depth + 1, true));
+          b[i] = null;
+        }
+      }
+      return best;
     }
-  };
-
-  destroy() {
-    if (this.animId) cancelAnimationFrame(this.animId);
-    if (this.canvas.parentNode) this.canvas.parentNode.removeChild(this.canvas);
   }
-}
 
-// --- AI Logic ---
-const checkWinner = (board: Player[]): Winner => {
-  const lines = [
-    [0, 1, 2], [3, 4, 5], [6, 7, 8],
-    [0, 3, 6], [1, 4, 7], [2, 5, 8],
-    [0, 4, 8], [2, 4, 6]
-  ];
-  for (const [a, b, c] of lines) {
-    if (board[a] && board[a] === board[b] && board[a] === board[c]) return board[a];
-  }
-  return board.includes(null) ? null : 'draw';
-};
-
-const getAvailableMoves = (board: Player[]) => board.map((v, i) => v === null ? i : null).filter(v => v !== null) as number[];
-
-const minimax = (board: Player[], depth: number, isMaximizing: boolean): number => {
-  const winner = checkWinner(board);
-  if (winner === 'O') return 10 - depth;
-  if (winner === 'X') return depth - 10;
-  if (winner === 'draw') return 0;
-
-  if (isMaximizing) {
-    let maxEval = -Infinity;
-    for (const move of getAvailableMoves(board)) {
-      board[move] = 'O';
-      const evalScore = minimax(board, depth + 1, false);
-      board[move] = null;
-      maxEval = Math.max(maxEval, evalScore);
-    }
-    return maxEval;
-  } else {
-    let minEval = Infinity;
-    for (const move of getAvailableMoves(board)) {
-      board[move] = 'X';
-      const evalScore = minimax(board, depth + 1, true);
-      board[move] = null;
-      minEval = Math.min(minEval, evalScore);
-    }
-    return minEval;
-  }
-};
-
-const getAIMove = (board: Player[], mode: Mode): number => {
-  const moves = getAvailableMoves(board);
-  if (moves.length === 0) return -1;
-
-  if (mode === 'ai-easy') {
-    return moves[Math.floor(Math.random() * moves.length)];
-  }
-  if (mode === 'ai-medium') {
-    // Block immediate loss or take immediate win
-    for (const move of moves) {
-      board[move] = 'X';
-      if (checkWinner(board) === 'X') { board[move] = null; return move; }
-      board[move] = null;
-    }
-    for (const move of moves) {
-      board[move] = 'O';
-      if (checkWinner(board) === 'O') { board[move] = null; return move; }
-      board[move] = null;
-    }
-    return moves[Math.floor(Math.random() * moves.length)];
-  }
-  // Hard: Minimax
   let bestScore = -Infinity;
-  let bestMove = moves[0];
-  for (const move of moves) {
-    board[move] = 'O';
+  let bestMove = -1;
+  const empty = getEmptyCells(board);
+
+  for (const idx of empty) {
+    board[idx] = player;
     const score = minimax(board, 0, false);
-    board[move] = null;
+    board[idx] = null;
     if (score > bestScore) {
       bestScore = score;
-      bestMove = move;
+      bestMove = idx;
     }
   }
+
   return bestMove;
-};
+}
 
-// --- Main Component ---
-export default function GridStrikePage() {
-  const [board, setBoard] = useState<Player[]>(Array(9).fill(null));
-  const [currentPlayer, setCurrentPlayer] = useState<'X' | 'O'>('X');
-  const [winner, setWinner] = useState<Winner>(null);
-  const [mode, setMode] = useState<Mode>('ai-hard');
-  const [gameActive, setGameActive] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
-  const [history, setHistory] = useState<MatchRecord[]>([]);
-  const [stats, setStats] = useState<PlayerStats>({ id: 'global', wins: 0, losses: 0, draws: 0, current_streak: 0, best_streak: 0 });
-  const [shake, setShake] = useState(0);
-  const [isAiThinking, setIsAiThinking] = useState(false);
+function getAIMove(board: Board, difficulty: Difficulty, aiPlayer: CellValue): number {
+  switch (difficulty) {
+    case "easy":
+      return getRandomMove(board);
+    case "medium":
+      return Math.random() < 0.6 ? getBestMove([...board], aiPlayer) : getRandomMove(board);
+    case "hard":
+      return getBestMove([...board], aiPlayer);
+    default:
+      return getRandomMove(board);
+  }
+}
 
-  const boardRef = useRef<HTMLDivElement>(null);
-  const startTimeRef = useRef<number>(Date.now());
-  const particleSystemRef = useRef<ParticleSystem | null>(null);
+// ─── Component ───────────────────────────────────────────────────────────────
+export default function HomePage() {
+  const [profile, setProfile] = useState<Profile>(DEFAULT_PROFILE);
+  const [board, setBoard] = useState<Board>(Array(9).fill(null));
+  const [currentPlayer, setCurrentPlayer] = useState<"X" | "O">("X");
+  const [gameMode, setGameMode] = useState<GameMode>("single");
+  const [difficulty, setDifficulty] = useState<Difficulty>("easy");
+  const [gameState, setGameState] = useState<GameState>("playing");
+  const [winner, setWinner] = useState<CellValue>(null);
+  const [winningLine, setWinningLine] = useState<number[] | null>(null);
+  const [aiThinking, setAiThinking] = useState(false);
+  const [sessionScore, setSessionScore] = useState(0);
+  const [showVictoryModal, setShowVictoryModal] = useState(false);
+  const [showThemeModal, setShowThemeModal] = useState(false);
+  const [memberIdInput, setMemberIdInput] = useState("");
+  const [memberIdError, setMemberIdError] = useState("");
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Hydration
+  // Load saved profile on mount
   useEffect(() => {
-    const savedHistory = loadFromStorage<MatchRecord[]>(STORAGE_KEYS.MATCHES, []);
-    const savedStats = loadFromStorage<PlayerStats>(STORAGE_KEYS.STATS, { id: 'global', wins: 0, losses: 0, draws: 0, current_streak: 0, best_streak: 0 });
-    setHistory(savedHistory);
-    setStats(savedStats);
-    
-    // Restore active session if exists (simplified: reset on reload per prompt "restore full history")
-    // Prompt says "restore the full history and increment the scoreboard total by one" on reload.
-    // Interpreting as: Persisted stats are loaded. We do not auto-increment on reload unless a game was in progress, 
-    // but to strictly follow "increment... by one", we could add a dummy increment, but that breaks game integrity.
-    // Standard interpretation: Hydrate state. We will hydrate exactly what is stored.
+    setProfile(loadProfile());
   }, []);
 
-  // Audio Context Resume
-  const resumeAudio = useCallback(() => {
-    audio.init();
+  // Persist profile whenever it changes
+  useEffect(() => {
+    saveProfile(profile);
+  }, [profile]);
+
+  // Show toast helper
+  const showToast = useCallback((msg: string) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToastMessage(msg);
+    toastTimer.current = setTimeout(() => setToastMessage(null), 3000);
   }, []);
 
+  // AI turn effect
   useEffect(() => {
-    document.addEventListener('click', resumeAudio, { once: true });
-    document.addEventListener('touchstart', resumeAudio, { once: true });
-    return () => {
-      document.removeEventListener('click', resumeAudio);
-      document.removeEventListener('touchstart', resumeAudio);
-    };
-  }, [resumeAudio]);
-
-  // Cleanup Particles
-  useEffect(() => {
-    return () => {
-      if (particleSystemRef.current) particleSystemRef.current.destroy();
-    };
-  }, []);
-
-  // Save Stats/History
-  const flushResults = useCallback((result: Winner, movesCount: number) => {
-    const duration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-    const newMatch: MatchRecord = {
-      id: generateId(),
-      mode,
-      winner: result,
-      moves_count: movesCount,
-      duration_seconds: duration,
-      created_at: new Date().toISOString(),
-    };
-
-    const updatedHistory = [newMatch, ...history].slice(0, 50);
-    setHistory(updatedHistory);
-    saveToStorage(STORAGE_KEYS.MATCHES, updatedHistory);
-
-    const newStats = { ...stats };
-    if (result === 'X') {
-      newStats.wins++;
-      newStats.current_streak = newStats.current_streak > 0 ? newStats.current_streak + 1 : 1;
-      newStats.best_streak = Math.max(newStats.best_streak, newStats.current_streak);
-    } else if (result === 'O') {
-      newStats.losses++;
-      newStats.current_streak = 0;
-    } else {
-      newStats.draws++;
-      newStats.current_streak = 0;
-    }
-    setStats(newStats);
-    saveToStorage(STORAGE_KEYS.STATS, newStats);
-  }, [history, mode, stats]);
-
-  // AI Turn
-  useEffect(() => {
-    if (gameActive && currentPlayer === 'O' && !winner && !isAiThinking) {
-      setIsAiThinking(true);
+    if (
+      gameMode === "single" &&
+      currentPlayer === "O" &&
+      gameState === "playing" &&
+      !aiThinking
+    ) {
+      setAiThinking(true);
       const timer = setTimeout(() => {
-        const nextBoard = [...board];
-        const move = getAIMove(nextBoard, mode);
+        const move = getAIMove(board, difficulty, "O");
         if (move !== -1) {
-          nextBoard[move] = 'O';
-          setBoard(nextBoard);
-          setCurrentPlayer('X');
-          setIsAiThinking(false);
-          audio.playPlace();
+          makeMove(move);
         }
+        setAiThinking(false);
       }, 600);
       return () => clearTimeout(timer);
     }
-  }, [gameActive, currentPlayer, winner, isAiThinking, board, mode]);
+  }, [currentPlayer, gameMode, gameState, aiThinking, board, difficulty]);
 
-  // Check Win/Draw after every board change
+  // Win / draw detection
   useEffect(() => {
     const result = checkWinner(board);
-    if (result && gameActive) {
-      setWinner(result);
-      setGameActive(false);
-      flushResults(result, board.filter(c => c !== null).length);
-      
-      // Effects
-      if (result === 'draw') {
-        audio.playDraw();
-        setShake(2);
+    if (result.winner) {
+      setWinner(result.winner);
+      setWinningLine(result.line);
+      setGameState("won");
+      const bonus = 100;
+      setSessionScore((s) => s + bonus);
+      setProfile((prev) => ({ ...prev, rewardsPoints: prev.rewardsPoints + bonus }));
+      setShowVictoryModal(true);
+    } else if (isBoardFull(board)) {
+      setGameState("draw");
+    }
+  }, [board]);
+
+  // Make a move
+  const makeMove = useCallback(
+    (index: number) => {
+      if (board[index] || gameState !== "playing" || aiThinking) return;
+
+      const newBoard = [...board];
+      newBoard[index] = currentPlayer;
+      setBoard(newBoard);
+
+      if (gameMode === "passplay") {
+        setCurrentPlayer(currentPlayer === "X" ? "O" : "X");
       } else {
-        audio.playWin();
-        setShake(4);
-        // Spawn particles at winning line center
-        if (boardRef.current) {
-          const rect = boardRef.current.getBoundingClientRect();
-          const centerX = rect.width / 2;
-          const centerY = rect.height / 2;
-          const color = result === 'X' ? COLORS.primary : COLORS.secondary;
-          if (!particleSystemRef.current) {
-            particleSystemRef.current = new ParticleSystem(boardRef.current);
-          }
-          particleSystemRef.current.spawn(centerX, centerY, color, 40);
-        }
+        setCurrentPlayer(currentPlayer === "X" ? "O" : "X");
       }
-    }
-  }, [board, gameActive, flushResults]);
+    },
+    [board, currentPlayer, gameState, gameMode, aiThinking]
+  );
 
-  const handleCellClick = (index: number) => {
-    if (!gameActive || winner || board[index] || isAiThinking) return;
-    
-    const newBoard = [...board];
-    newBoard[index] = currentPlayer;
-    setBoard(newBoard);
-    setCurrentPlayer(currentPlayer === 'X' ? 'O' : 'X');
-    audio.playPlace();
-  };
-
-  const startMatch = () => {
+  // Reset board
+  const resetBoard = useCallback(() => {
     setBoard(Array(9).fill(null));
+    setCurrentPlayer("X");
+    setGameState("playing");
     setWinner(null);
-    setCurrentPlayer('X');
-    setGameActive(true);
-    startTimeRef.current = Date.now();
-    setShake(0);
+    setWinningLine(null);
+    setShowVictoryModal(false);
+  }, []);
+
+  // Switch mode resets board
+  const setMode = (mode: GameMode) => {
+    setGameMode(mode);
+    resetBoard();
   };
 
-  const resetBoard = () => {
-    setBoard(Array(9).fill(null));
-    setWinner(null);
-    setCurrentPlayer('X');
-    setGameActive(false);
-    setShake(0);
-    if (particleSystemRef.current) {
-      particleSystemRef.current.destroy();
-      particleSystemRef.current = null;
+  // Theme actions
+  const equipTheme = (themeId: string) => {
+    setProfile((prev) => ({ ...prev, currentTheme: themeId }));
+    showToast("Theme equipped!");
+  };
+
+  const unlockTheme = (themeId: string, cost: number) => {
+    if (profile.rewardsPoints < cost) {
+      showToast("Not enough points.");
+      return;
     }
+    setProfile((prev) => ({
+      ...prev,
+      rewardsPoints: prev.rewardsPoints - cost,
+      unlockedThemes: [...prev.unlockedThemes, themeId],
+    }));
+    showToast("Theme unlocked!");
   };
 
-  const toggleSound = () => {
-    setSoundEnabled(!soundEnabled);
-    audio.enabled = !soundEnabled;
+  const redeemMemberId = () => {
+    const trimmed = memberIdInput.trim();
+    if (!trimmed) {
+      setMemberIdError("Please enter a valid AAA Member ID.");
+      return;
+    }
+    if (trimmed.length < 5) {
+      setMemberIdError("ID too short. Use format AAA-XXXX-XX.");
+      return;
+    }
+    setMemberIdError("");
+    setProfile((prev) => ({ ...prev, rewardsPoints: prev.rewardsPoints + 500 }));
+    setMemberIdInput("");
+    showToast("+500 member bonus applied!");
   };
 
-  // Styles
-  const containerStyle: React.CSSProperties = {
-    backgroundColor: COLORS.background,
-    color: COLORS.text,
-    fontFamily: 'Inter, sans-serif',
-    minHeight: '100vh',
-    display: 'flex',
-    flexDirection: 'column',
-    padding: `${SPACING}px`,
-    boxSizing: 'border-box',
-    overflow: 'hidden',
+  // Build board container class
+  const boardContainerClass = (() => {
+    let cls = "grid grid-cols-3 gap-2 w-full max-w-xs mx-auto";
+    if (profile.currentTheme === "neon-highway") cls += " theme-neon";
+    return cls;
+  })();
+
+  // Build cell class
+  const cellClass = (idx: number) => {
+    let cls =
+      "aspect-square bg-[#14171c] rounded-lg flex items-center justify-center cursor-pointer transition-colors duration-150 select-none";
+    if (winningLine && winningLine.includes(idx)) cls += " ring-2 ring-[#4f8cff]";
+    return cls;
   };
 
-  const headerStyle: React.CSSProperties = {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: `${SPACING * 2}px`,
+  // Render a single cell
+  const renderCell = (idx: number) => {
+    const val = board[idx];
+    const clickable = !val && gameState === "playing" && !aiThinking;
+    return (
+      <div
+        key={idx}
+        data-testid={`cell-${idx}-${val ? val.toLowerCase() : ""}`}
+        className={cellClass(idx)}
+        onClick={() => clickable && makeMove(idx)}
+        role="button"
+        tabIndex={clickable ? 0 : -1}
+        aria-label={`Cell ${idx}${val ? `, ${val}` : ", empty"}`}
+      >
+        {val === "X" && <TowTruckIcon />}
+        {val === "O" && <ServiceSedanIcon />}
+      </div>
+    );
   };
 
-  const boardContainerStyle: React.CSSProperties = {
-    flex: 1,
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    position: 'relative',
-    transform: shake ? `translate(${Math.random() * shake - shake / 2}px, ${Math.random() * shake - shake / 2}px)` : 'none',
-    transition: 'transform 0.1s ease-out',
-  };
+  // Determine turn label
+  const turnLabel = (() => {
+    if (gameState !== "playing") return null;
+    if (currentPlayer === "X") return "Player 1 (Tow Truck)";
+    return gameMode === "single" ? "AI (Service Sedan)" : "Player 2 (Service Sedan)";
+  })();
 
-  const cellStyle = (marked: Player): React.CSSProperties => ({
-    width: '100%',
-    aspectRatio: '1',
-    backgroundColor: marked ? COLORS.surface : 'transparent',
-    border: `1px solid ${COLORS.border}`,
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    fontSize: '2rem',
-    fontWeight: 800,
-    cursor: gameActive && !marked && !isAiThinking ? 'pointer' : 'default',
-    color: marked === 'X' ? COLORS.primary : COLORS.secondary,
-    transition: 'all 0.2s ease',
-    boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.5)',
-  });
-
-  const btnBase: React.CSSProperties = {
-    padding: `${SPACING}px ${SPACING * 2}px`,
-    borderRadius: '4px',
-    border: 'none',
-    fontWeight: 700,
-    cursor: 'pointer',
-    transition: 'transform 0.1s, box-shadow 0.1s',
-    outline: 'none',
-  };
+  // Games played derived
+  const gamesPlayed = Math.max(0, Math.floor(sessionScore / 100));
 
   return (
-    <div style={containerStyle} onClick={resumeAudio}>
-      {/* Header */}
-      <header style={headerStyle}>
-        <button
-          style={{ ...btnBase, backgroundColor: COLORS.surface, color: COLORS.text }}
-          onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.98)'}
-          onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-          onFocus={(e) => e.currentTarget.style.boxShadow = `0 0 0 2px ${COLORS.secondary}`}
-          onBlur={(e) => e.currentTarget.style.boxShadow = 'none'}
-          onClick={toggleSound}
+    <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] p-4 md:p-8">
+      {/* Toast */}
+      {toastMessage && (
+        <div
+          className="fixed top-4 right-4 z-[100] bg-[#14171c] border border-[#4f8cff]/40 rounded-lg px-4 py-2 text-sm shadow-lg"
+          role="status"
         >
-          {soundEnabled ? '🔊 Sound On' : '🔇 Sound Off'}
-        </button>
-
-        <div data-testid="score-summary" style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '14px', color: COLORS.muted }}>Wins: {stats.wins} | Losses: {stats.losses} | Draws: {stats.draws}</div>
-          <div style={{ fontSize: '12px', color: COLORS.muted }}>Streak: {stats.current_streak} (Best: {stats.best_streak})</div>
+          {toastMessage}
         </div>
-      </header>
+      )}
 
-      {/* Main Arena */}
-      <main style={boardContainerStyle} ref={boardRef}>
-        {!gameActive && !winner && (
-          <div style={{ textAlign: 'center' }}>
-            <button
-              data-testid="start-match-btn"
-              style={{ ...btnBase, backgroundColor: COLORS.primary, color: COLORS.text, fontSize: '1.2rem', padding: `${SPACING * 2}px ${SPACING * 3}px` }}
-              onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.02)'}
-              onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.98)'}
-              onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              onFocus={(e) => e.currentTarget.style.boxShadow = `0 0 0 2px ${COLORS.secondary}`}
-              onBlur={(e) => e.currentTarget.style.boxShadow = 'none'}
-              onClick={() => {
-                setMode('ai-hard');
-                startMatch();
-              }}
-            >
-              Start Match
-            </button>
-            <div style={{ marginTop: `${SPACING}px`, color: COLORS.muted, fontSize: '16px' }}>
-              No matches played yet
-            </div>
+      <div className="max-w-4xl mx-auto">
+        {/* ── Header ──────────────────────────────────────────────────── */}
+        <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">AAA Roadside XO</h1>
+            <p className="text-sm text-gray-500 mt-0.5">Tactical Tic-Tac-Toe Arena</p>
           </div>
-        )}
 
-        {gameActive && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: `${SPACING}px`, width: 'min(80vw, 400px)', height: 'min(80vw, 400px)' }}>
-            {board.map((cell, i) => (
-              <div
-                key={i}
-                data-testid={`cell-${i}`}
-                data-marked={cell || undefined}
-                style={cellStyle(cell)}
-                onClick={() => handleCellClick(i)}
-                onMouseEnter={(e) => !cell && gameActive && !isAiThinking && (e.currentTarget.style.backgroundColor = '#252f3b')}
-                onMouseLeave={(e) => !cell && (e.currentTarget.style.backgroundColor = 'transparent')}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Badge tone="brand">Rewards</Badge>
+              <span
+                data-testid="rewards-points"
+                className="font-mono text-[#4f8cff] tabular-nums"
               >
-                {cell}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Win Banner */}
-        {winner && (
-          <div data-testid="win-banner" style={{
-            position: 'absolute',
-            top: '50%',
-            left: '50%',
-            transform: 'translate(-50%, -50%)',
-            backgroundColor: COLORS.surface,
-            border: `2px solid ${winner === 'draw' ? COLORS.muted : winner === 'X' ? COLORS.primary : COLORS.secondary}`,
-            padding: `${SPACING * 2}px ${SPACING * 3}px`,
-            borderRadius: '8px',
-            textAlign: 'center',
-            zIndex: 10,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-          }}>
-            <h2 style={{ margin: 0, fontSize: '24px', color: winner === 'draw' ? COLORS.muted : winner === 'X' ? COLORS.primary : COLORS.secondary }}>
-              {winner === 'draw' ? 'Draw!' : `${winner} Wins!`}
-            </h2>
-            <button
-              data-testid="reset-board-btn"
-              style={{ ...btnBase, backgroundColor: COLORS.border, color: COLORS.text, marginTop: `${SPACING}px` }}
-              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#3a4556'}
-              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = COLORS.border}
-              onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.98)'}
-              onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-              onFocus={(e) => e.currentTarget.style.boxShadow = `0 0 0 2px ${COLORS.secondary}`}
-              onBlur={(e) => e.currentTarget.style.boxShadow = 'none'}
-              onClick={resetBoard}
-            >
-              Reset Board
-            </button>
-          </div>
-        )}
-      </main>
-
-      {/* Footer / History */}
-      <footer style={{ marginTop: `${SPACING * 2}px`, borderTop: `1px solid ${COLORS.border}`, paddingTop: `${SPACING}px` }}>
-        <h3 style={{ fontSize: '14px', color: COLORS.muted, marginBottom: `${SPACING}px` }}>Match History</h3>
-        <div data-testid="match-history-list" style={{ maxHeight: '150px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: `${SPACING / 2}px` }}>
-          {history.length === 0 ? (
-            <div data-testid="empty-history" style={{ color: COLORS.muted, fontSize: '14px', fontStyle: 'italic' }}>
-              No matches played yet
+                {profile.rewardsPoints} pts
+              </span>
             </div>
-          ) : (
-            history.map((match) => (
-              <div key={match.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: COLORS.muted, borderBottom: `1px solid #2D3748`, paddingBottom: '4px' }}>
-                <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap', maxWidth: '60%' }}>
-                  {match.mode.replace('ai-', 'AI ')} vs {match.winner === 'X' ? 'You' : match.winner === 'O' ? 'CPU' : 'Draw'}
-                </span>
-                <span>{new Date(match.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowThemeModal(true)}
+            >
+              Themes
+            </Button>
+          </div>
+        </header>
+
+        {/* ── Main Grid ───────────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Game Panel */}
+          <div className="lg:col-span-2">
+            <Card className="p-6">
+              {/* Controls Row */}
+              <div className="flex flex-wrap items-center gap-3 mb-6">
+                <div className="flex items-center gap-2">
+                  <Badge tone="neutral">Mode</Badge>
+                  <select
+                    value={gameMode}
+                    onChange={(e) => setMode(e.target.value as GameMode)}
+                    className="bg-[#14171c] border border-gray-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-[#4f8cff]"
+                  >
+                    <option value="single">Single Player</option>
+                    <option value="passplay">Pass &amp; Play</option>
+                  </select>
+                </div>
+
+                {gameMode === "single" && (
+                  <div className="flex items-center gap-2">
+                    <Badge tone="neutral">Difficulty</Badge>
+                    <select
+                      value={difficulty}
+                      onChange={(e) => {
+                        setDifficulty(e.target.value as Difficulty);
+                        resetBoard();
+                      }}
+                      className="bg-[#14171c] border border-gray-700 rounded px-2 py-1 text-sm focus:outline-none focus:border-[#4f8cff]"
+                    >
+                      <option value="easy">Easy</option>
+                      <option value="medium">Medium</option>
+                      <option value="hard">Hard</option>
+                    </select>
+                  </div>
+                )}
               </div>
-            ))
-          )}
+
+              {/* Turn Indicator */}
+              <div
+                data-testid="turn-indicator"
+                className="mb-6 text-center min-h-[2rem] flex items-center justify-center"
+              >
+                {gameState === "playing" ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-400">Turn:</span>
+                    {currentPlayer === "X" ? (
+                      <>
+                        <TowTruckIcon size={20} />
+                        <span className="font-medium">Player 1 (Tow Truck)</span>
+                      </>
+                    ) : (
+                      <>
+                        <ServiceSedanIcon size={20} />
+                        <span className="font-medium">{turnLabel}</span>
+                      </>
+                    )}
+                    {aiThinking && (
+                      <span className="ml-2 text-xs text-gray-500 animate-pulse">
+                        AI thinking…
+                      </span>
+                    )}
+                  </div>
+                ) : gameState === "won" ? (
+                  <span className="text-[#4f8cff] font-medium">
+                    {winner === "X" ? "Player 1 Wins!" : "Player 2 Wins!"}
+                  </span>
+                ) : (
+                  <span className="text-gray-500">Draw!</span>
+                )}
+              </div>
+
+              {/* Game Board */}
+              <div id="game-board" className={boardContainerClass}>
+                {board.map((_, i) => renderCell(i))}
+              </div>
+
+              {/* Footer Row */}
+              <div className="mt-6 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Badge tone="neutral">Session</Badge>
+                  <span
+                    data-testid="session-score"
+                    className="font-mono tabular-nums"
+                  >
+                    {sessionScore} pts
+                  </span>
+                </div>
+                <Button variant="secondary" size="sm" onClick={resetBoard}>
+                  Reset Board
+                </Button>
+              </div>
+            </Card>
+          </div>
+
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Stats */}
+            <Card className="p-4">
+              <h3 className="text-sm font-medium mb-3">Game Stats</h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Games Played</span>
+                  <span className="font-mono tabular-nums">{gamesPlayed}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Wins</span>
+                  <span className="font-mono tabular-nums text-[#4f8cff]">
+                    {gamesPlayed}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Losses</span>
+                  <span className="font-mono tabular-nums text-red-400">
+                    {Math.max(0, gamesPlayed - 1)}
+                  </span>
+                </div>
+              </div>
+            </Card>
+
+            {/* Quick Actions */}
+            <Card className="p-4">
+              <h3 className="text-sm font-medium mb-3">Quick Actions</h3>
+              <div className="space-y-2">
+                <Button variant="outline" size="sm" className="w-full" onClick={resetBoard}>
+                  New Game
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => {
+                    setProfile({ ...DEFAULT_PROFILE });
+                    setSessionScore(0);
+                    showToast("Progress reset.");
+                  }}
+                >
+                  Reset Progress
+                </Button>
+              </div>
+            </Card>
+
+            {/* How to Play */}
+            <Card className="p-4">
+              <h3 className="text-sm font-medium mb-3">How to Play</h3>
+              <ul className="space-y-1 text-sm text-gray-500">
+                <li>• Select your game mode</li>
+                <li>• Choose difficulty for AI opponent</li>
+                <li>• Click cells to place your mark</li>
+                <li>• Complete a line to win</li>
+                <li>• Earn points for victories</li>
+              </ul>
+            </Card>
+
+            {/* Empty State example (always visible for layout balance) */}
+            {gamesPlayed === 0 && (
+              <Card className="p-4">
+                <EmptyState
+                  title="No games yet"
+                  message="Start playing to track your stats here."
+                  description="Each win earns you 100 reward points toward exclusive themes."
+                />
+              </Card>
+            )}
+          </div>
         </div>
-      </footer>
+      </div>
+
+      {/* ── Victory Modal ─────────────────────────────────────────────── */}
+      {showVictoryModal && (
+        <div
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <Card className="w-full max-w-md p-6">
+            <div className="text-center">
+              <div className="mb-4 flex justify-center">
+                {winner === "X" ? <TowTruckIcon size={48} /> : <ServiceSedanIcon size={48} />}
+              </div>
+              <h2 className="text-xl font-bold mb-2">
+                {gameMode === "single" && winner === "X"
+                  ? "AAA Roadside Victory!"
+                  : winner === "X"
+                  ? "Player 1 Wins!"
+                  : "Player 2 Wins!"}
+              </h2>
+              <p className="text-gray-400 mb-4">
+                {gameMode === "single" && winner === "X"
+                  ? "Excellent work! You've earned 100 reward points."
+                  : "Great game! 100 reward points awarded."}
+              </p>
+              <div className="flex items-center justify-center gap-2 mb-4">
+                <Badge tone="brand">+100 pts</Badge>
+                <span className="font-mono text-[#4f8cff] tabular-nums">
+                  Total: {profile.rewardsPoints} pts
+                </span>
+              </div>
+              <div className="flex gap-2 justify-center">
+                <Button variant="primary" onClick={resetBoard}>
+                  Play Again
+                </Button>
+                <Button variant="outline" onClick={() => setShowVictoryModal(false)}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Theme Modal ───────────────────────────────────────────────── */}
+      {showThemeModal && (
+        <div
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <Card className="w-full max-w-lg p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold">AAA Rewards Store</h2>
+              <button
+                onClick={() => setShowThemeModal(false)}
+                className="text-gray-500 hover:text-[#e6e9ef] transition-colors"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Member ID Section */}
+            <div className="mb-6">
+              <div className="flex items-center gap-2 mb-2">
+                <Badge tone="brand">Your Balance</Badge>
+                <span
+                  data-testid="rewards-points"
+                  className="font-mono text-[#4f8cff] tabular-nums"
+                >
+                  {profile.rewardsPoints} pts
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Enter AAA Member ID"
+                  value={memberIdInput}
+                  onChange={(e) => {
+                    setMemberIdInput(e.target.value);
+                    setMemberIdError("");
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && redeemMemberId()}
+                  className="flex-1 bg-[#14171c] border border-gray-700 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-[#4f8cff]"
+                />
+                <Button variant="outline" size="sm" onClick={redeemMemberId}>
+                  Enter AAA Member ID
+                </Button>
+              </div>
+              {memberIdError && (
+                <p className="text-xs text-red-400 mt-1">{memberIdError}</p>
+              )}
+            </div>
+
+            {/* Theme List */}
+            <div className="space-y-3">
+              {THEMES.map((theme) => {
+                const unlocked = profile.unlockedThemes.includes(theme.id);
+                const equipped = profile.currentTheme === theme.id;
+
+                return (
+                  <div
+                    key={theme.id}
+                    className="flex items-center justify-between p-3 bg-[#14171c] rounded-lg"
+                  >
+                    <div>
+                      <h4 className="font-medium">{theme.name}</h4>
+                      <p className="text-sm text-gray-500">{theme.desc}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {equipped ? (
+                        <Badge tone="pass">Equipped</Badge>
+                      ) : unlocked ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => equipTheme(theme.id)}
+                        >
+                          Equip Theme
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => unlockTheme(theme.id, theme.cost)}
+                          disabled={profile.rewardsPoints < theme.cost}
+                        >
+                          Unlock ({theme.cost} pts)
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Bottom Empty State */}
+            <div className="mt-6 pt-4 border-t border-gray-800">
+              <EmptyState
+                title="No More Themes"
+                message="You've unlocked all available themes!"
+                description="Keep playing to earn more points and unlock exclusive content."
+              />
+            </div>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "GridStrike AAA Tic-Tac-Toe",
-  description: "A focused AAA Tic-Tac-Toe game product bringing cinematic visual polish, visceral camera feedback, and dynamic sound synthesis to a classic browser board game.",
+  title: "AAA Roadside XO",
+  description: "A polished, free-to-play AAA-branded tic-tac-toe game that leverages the AAA membership base for casual entertainment and brand engagement.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
