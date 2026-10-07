@@ -2,108 +2,116 @@
 
 import React from 'react';
 
-// --- Shared Record Type (as per brief) ---
-export type Record = {
-  id: string;
-  title: string;
-  notes: string;
-  createdAt: string;
-};
+export type Record = { id: string; title: string; notes: string; createdAt: string };
 
-// --- Button Component ---
-interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  children: React.ReactNode;
-  variant?: 'primary' | 'secondary'; // Primary for main actions, secondary for less prominent
+const STORAGE_KEY = "lastmile:aaa-tic-tac:match_history";
+
+export function getMatchHistory(): Record[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
 }
 
-export const Button: React.FC<ButtonProps> = ({
-  children,
-  variant = 'primary',
-  className,
-  ...props
-}) => {
-  const baseStyles = "px-4 py-2 rounded-md font-inter text-sm font-medium transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#0b0d10]";
-  const primaryStyles = "bg-[#4f8cff] text-[#e6e9ef] hover:bg-[#3a70d9] focus:ring-[#4f8cff]";
-  const secondaryStyles = "bg-[#14171c] text-[#e6e9ef] border border-[#2a2e36] hover:bg-[#1f232b] focus:ring-[#4f8cff]"; // A more subtle button
-  const disabledStyles = "opacity-50 cursor-not-allowed";
+export function saveMatchHistory(history: Record[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+  } catch (e) {
+    console.error("Failed to persist match history", e);
+  }
+}
+
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary' | 'danger';
+}
+
+export function Button({ children, variant = 'primary', className = '', ...props }: ButtonProps) {
+  const base = "inline-flex items-center justify-center rounded px-4 py-2 font-mono text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-[#0b0d10] disabled:cursor-not-allowed disabled:opacity-50";
+  
+  const variants = {
+    primary: "bg-[#4f8cff] text-[#0b0d10] hover:bg-[#6ba3ff] active:bg-[#3a75e6] focus:ring-[#4f8cff]",
+    secondary: "bg-[#14171c] text-[#e6e9ef] border border-[#e6e9ef]/20 hover:border-[#e6e9ef]/40 hover:bg-[#1a1e25] focus:ring-[#e6e9ef]/20",
+    danger: "bg-red-900/40 text-red-200 border border-red-800/40 hover:bg-red-900/60 focus:ring-red-900/50"
+  };
 
   return (
-    <button
-      className={`${baseStyles} ${variant === 'primary' ? primaryStyles : secondaryStyles} ${props.disabled ? disabledStyles : ''} ${className || ''}`}
+    <button 
+      className={`${base} ${variants[variant]} ${className}`} 
       {...props}
     >
       {children}
     </button>
   );
-};
-
-// --- Card Component ---
-interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
-  children: React.ReactNode;
 }
 
-export const Card: React.FC<CardProps> = ({ children, className, ...props }) => {
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {}
+
+export function Card({ children, className = '', ...props }: CardProps) {
   return (
-    <div
-      className={`bg-[#14171c] rounded-lg p-6 shadow-lg border border-[#2a2e36] ${className || ''}`}
+    <div 
+      className={`rounded-lg border border-[#e6e9ef]/10 bg-[#14171c] p-5 shadow-sm ${className}`} 
       {...props}
     >
       {children}
     </div>
   );
-};
-
-// --- ListRow Component ---
-interface ListRowProps extends React.HTMLAttributes<HTMLDivElement> {
-  children: React.ReactNode;
-  onClick?: () => void;
-  active?: boolean; // For selected theme, etc.
 }
 
-export const ListRow: React.FC<ListRowProps> = ({ children, onClick, active, className, ...props }) => {
-  const baseStyles = "flex items-center justify-between px-4 py-3 rounded-md cursor-pointer transition-colors duration-200 text-[#e6e9ef] font-inter text-sm";
-  const hoverStyles = "hover:bg-[#1f232b]";
-  const activeStyles = "bg-[#4f8cff] hover:bg-[#4f8cff]/90 text-[#e6e9ef]"; // Accent for active state
+interface EmptyStateProps {
+  message?: string;
+  icon?: React.ReactNode;
+}
 
+export function EmptyState({ message = 'No matches played yet', icon = null }: EmptyStateProps) {
   return (
-    <div
-      className={`${baseStyles} ${onClick ? hoverStyles : ''} ${active ? activeStyles : ''} ${className || ''}`}
-      onClick={onClick}
-      {...props}
+    <div 
+      data-testid="empty-history" 
+      className="flex min-h-[200px] flex-col items-center justify-center gap-3 py-12 text-center"
     >
-      {children}
-    </div>
-  );
-};
-
-// --- EmptyState Component ---
-interface EmptyStateProps extends React.HTMLAttributes<HTMLDivElement> {
-  message: string;
-  icon?: React.ReactNode; // Optional icon
-  actionButton?: React.ReactNode; // Optional button for action
-}
-
-export const EmptyState: React.FC<EmptyStateProps> = ({ message, icon, actionButton, className, ...props }) => {
-  return (
-    <Card className={`flex flex-col items-center justify-center text-center p-8 min-h-[200px] ${className || ''}`} {...props}>
-      {icon && <div className="mb-4 text-[#4f8cff] text-4xl">{icon}</div>}
-      <p className="text-[#e6e9ef] text-lg font-inter mb-4 max-w-prose break-words">
+      {icon && <div className="mb-2 opacity-50">{icon}</div>}
+      <p className="font-mono text-sm tracking-wide text-[#e6e9ef]/60">
         {message}
       </p>
-      {actionButton && <div className="mt-4">{actionButton}</div>}
-    </Card>
+    </div>
   );
-};
-
-// --- Typography Helper for Monospace Font ---
-interface MonospaceTextProps extends React.HTMLAttributes<HTMLSpanElement> {
-  children: React.ReactNode;
 }
 
-export const MonospaceText: React.FC<MonospaceTextProps> = ({ children, className, ...props }) => {
+interface ListRowProps {
+  record: Record;
+}
+
+export function ListRow({ record }: ListRowProps) {
+  const dateStr = new Date(record.createdAt).toLocaleDateString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric'
+  });
+
   return (
-    <span className={`font-jetbrains-mono text-[#e6e9ef] ${className || ''}`} {...props}>
-      {children}
-    </span>
+    <div className="group flex flex-col gap-3 border-b border-[#e6e9ef]/5 p-4 last:border-0 transition-colors hover:bg-[#14171c]/60">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-mono text-sm font-semibold text-[#e6e9ef] truncate" title={record.title}>
+            {record.title}
+          </h3>
+          <p 
+            className="mt-1 max-w-full overflow-hidden text-xs leading-relaxed text-[#e6e9ef]/70 line-clamp-2" 
+            title={record.notes}
+          >
+            {record.notes}
+          </p>
+        </div>
+        <div className="shrink-0 text-right">
+          <span className="block font-mono text-[10px] font-medium text-[#4f8cff]">
+            {record.id.slice(0, 8)}
+          </span>
+          <span className="block font-mono text-[10px] text-[#e6e9ef]/40">
+            {dateStr}
+          </span>
+        </div>
+      </div>
+    </div>
   );
-};
+}
