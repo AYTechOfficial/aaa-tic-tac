@@ -9,6 +9,7 @@ type Cell = Player | null;
 type Board = Cell[];
 type GameMode = 'single' | 'passplay';
 type Difficulty = 'easy' | 'medium' | 'hard';
+type MatchHistory = { id: string; mode: GameMode; winner: Player | null; played_at: string };
 
 const WINNING_COMBINATIONS = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8],
@@ -67,7 +68,7 @@ export default function Home() {
       if (gameBoard) {
         gameBoard.className = '';
         if (themeId === 'neon-highway') {
-          gameBoard.classList.add('border-[var(--accent)]', 'shadow-[0_0_15px_var(--accent)]');
+          gameBoard.classList.add('border-[var(--accent)]', 'shadow-[0_0_15px_var(--accent)]', 'theme-neon');
         } else if (themeId === 'desert-route66') {
           gameBoard.classList.add('border-amber-500', 'bg-amber-900/10');
         }
@@ -119,7 +120,7 @@ export default function Home() {
       setShowModal(true);
       addPoints(100);
       setSessionScore(s => s + 100);
-      setMatchHistory(prev => [...prev, { id: crypto.randomUUID(), mode: gameMode, winner: result.winner, played_at: new Date().toISOString() }]);
+      setMatchHistory(prev => [...prev, { id: crypto.randomUUID(), mode: gameMode, winner: result.winner, played_at: new Date().toISOString() } as MatchHistory]);
     } else if (newBoard.every(cell => cell !== null)) {
       setDraw(true);
       setShowModal(true);
@@ -152,7 +153,7 @@ export default function Home() {
             setShowModal(true);
             addPoints(100);
             setSessionScore(s => s + 100);
-            setMatchHistory(prev => [...prev, { id: crypto.randomUUID(), mode: 'single', winner: result.winner, played_at: new Date().toISOString() }]);
+            setMatchHistory(prev => [...prev, { id: crypto.randomUUID(), mode: 'single', winner: result.winner, played_at: new Date().toISOString() } as MatchHistory]);
           } else if (newBoard.every(cell => cell !== null)) {
             setDraw(true);
             setShowModal(true);
@@ -208,13 +209,13 @@ export default function Home() {
         </Card>
         <div className="flex justify-between items-center mb-2">
           <span data-testid="turn-indicator" className="text-lg font-medium text-[var(--primary)]">
-            {winner ? 'Game Over' : draw ? 'Draw!' : `${isXNext ? 'Player 1 (Tow Truck)' : 'Player 2 (Sedan)'}'s Turn`}
+            {winner ? 'Game Over' : draw ? 'Draw!' : `${isXNext ? 'Player 1 (Tow Truck)' : 'Player 2 (Service Sedan)'}'s Turn`}
           </span>
           <span data-testid="session-score" className="text-sm text-[var(--secondary)]">Session Score: {sessionScore}</span>
         </div>
         <div id="game-board" className="grid grid-cols-3 gap-2 w-full max-w-md aspect-square bg-[var(--surface)] p-2 rounded-xl border border-white/10 shadow-lg">
           {board.map((cell, index) => (
-            <button key={index} onClick={() => handleClick(index)} disabled={!!cell || !!winner || !!draw || (gameMode === 'single' && !isXNext)} className="relative flex items-center justify-center text-4xl font-bold rounded-lg bg-white/[0.02] hover:bg-white/5 transition-all disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--accent)]">
+            <button key={index} data-testid={`cell-${index}-${currentPlayer.toLowerCase()}`} onClick={() => handleClick(index)} disabled={!!cell || !!winner || !!draw || (gameMode === 'single' && !isXNext)} className="relative flex items-center justify-center text-4xl font-bold rounded-lg bg-white/[0.02] hover:bg-white/5 transition-all disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-[var(--accent)]">
               {cell === 'X' && <span className="text-[var(--accent)]">🚛</span>}
               {cell === 'O' && <span className="text-blue-400">🚗</span>}
               {winningLine?.includes(index) && !cell && <div className="absolute inset-0 bg-[var(--accent)]/20 rounded-lg animate-pulse" />}
