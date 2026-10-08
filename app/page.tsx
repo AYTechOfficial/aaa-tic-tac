@@ -35,7 +35,7 @@ export default function Page() {
 
   useEffect(() => {
     try {
-      const raw = readLocal<AppState>(STORAGE_KEY, null);
+      const raw = readLocal<AppState | null>(STORAGE_KEY, null);
       if (raw) setS(p => ({ ...p, ...raw }));
     } catch {}
   }, []);
@@ -61,8 +61,8 @@ export default function Page() {
   const checkWin = useCallback((b: (string|null)[]) => {
     const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
     for (const l of lines) {
-      const [a,bx,c] = l;
-      if (b[a] && b[a]===bx && b[a]===c) return { winner: b[a], line: l };
+      const [a, bIdx, c] = l;
+      if (b[a] && b[a] === b[bIdx] && b[a] === b[c]) return { winner: b[a], line: l };
     }
     return null;
   }, []);
@@ -151,7 +151,7 @@ export default function Page() {
                   <button
                     key={i}
                     onClick={() => place(i)}
-                    disabled={!!cell || s.phase !== 'playing'}
+                    disabled={s.phase !== 'playing'}
                     className={`
                       w-20 h-20 sm:w-24 sm:h-24 flex items-center justify-center text-3xl font-mono font-bold rounded-md transition-all duration-100
                       ${cell ? 'bg-[#0b0d10]' : 'hover:bg-[#1a1d24] cursor-pointer'}

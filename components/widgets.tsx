@@ -7,7 +7,7 @@ import { Button, Card, Badge, EmptyState, ListRow } from '@/components/ui';
 export type RecordItem = { id: string; title: string; notes: string; createdAt: string };
 
 type GameState = {
-  board: string[] | null[];
+  board: ('X' | 'O' | null)[];
   currentPlayer: 'X' | 'O';
   phase: 'idle' | 'queue' | 'playing' | 'victory' | 'draw';
   winner: 'X' | 'O' | null;
@@ -15,6 +15,13 @@ type GameState = {
   settings: { skin: 'classic' | 'neon' | 'monochrome' };
   score: { x: number; o: number };
 };
+
+type GameAction =
+  | { type: 'START_QUEUE' }
+  | { type: 'START_PLAYING' }
+  | { type: 'PLACE'; payload: { index: number; player: 'X' | 'O' } }
+  | { type: 'RESET_GAME' }
+  | { type: 'UPDATE_SETTINGS'; skin: 'classic' | 'neon' | 'monochrome' };
 
 const STORAGE_KEY = "lastmile:aaa-tic-tac:gameState";
 
@@ -34,7 +41,7 @@ const WIN_LINES = [
   [0, 4, 8], [2, 4, 6]
 ];
 
-const checkWinCondition = (board: string[]): { winner: 'X' | 'O' | null; cells: number[] } => {
+const checkWinCondition = (board: ('X' | 'O' | null)[]): { winner: 'X' | 'O' | null; cells: number[] } => {
   for (const [a, b, c] of WIN_LINES) {
     if (board[a] && board[a] === board[b] && board[a] === board[c]) {
       return { winner: board[a], cells: [a, b, c] };
@@ -165,7 +172,7 @@ export const GameBoard = ({
   dispatch 
 }: { 
   state: GameState; 
-  dispatch: React.Dispatch<React.Reducer<GameState, any>>; 
+  dispatch: React.Dispatch<GameAction>; 
 }) => {
   const skinStyles = {
     classic: 'border-[#4f8cff]/30 bg-[#14171c]',
@@ -282,7 +289,7 @@ export const MoveHistory = ({ history }: { history: RecordItem[] }) => (
 
 export default function TripleATicTacToeWidgets() {
   const [state, dispatch] = React.useReducer(
-    (prev: GameState, action: any): GameState => {
+    (prev: GameState, action: GameAction): GameState => {
       switch (action.type) {
         case 'START_QUEUE':
           return { ...prev, phase: 'queue' };

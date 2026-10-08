@@ -54,7 +54,7 @@ const checkWinner = (
 export default function PlayPage() {
   const [state, setState] = useState<GameState>(() => {
     try {
-      const saved = readLocal<GameState>(STORAGE_KEY, null);
+      const saved = readLocal<GameState | null>(STORAGE_KEY, null);
       return (
         saved || {
           phase: "idle",
