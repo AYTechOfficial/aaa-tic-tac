@@ -1,328 +1,405 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { readLocal, writeLocal } from "@/lib/persist";
-import { Button } from "@/components/ui";
-import { Card } from "@/components/ui";
-import { Badge } from "@/components/ui";
-import { EmptyState } from "@/components/ui";
-import { ListRow } from "@/components/ui";
+import React, { useState, useEffect, useCallback } from 'react';
+import { readLocal, writeLocal } from '@/lib/persist';
+import { Button, Card, Badge, EmptyState, ListRow } from '@/components/ui';
 
-type Player = "X" | "O";
-type CellValue = Player | null;
-type Board = CellValue[];
-type GamePhase = "lobby" | "queue" | "matched" | "playing" | "result" | "draw";
+export type RecordItem = { id: string; title: string; notes: string; createdAt: string };
 
-interface GameState {
-  phase: GamePhase;
-  board: Board;
-  currentPlayer: Player;
-  winner: Player | null;
-  draw: boolean;
-  queueTime: number;
-  opponentRank: string;
-  opponentAvatar: string;
-  modifiers: { id: string; label: string; description: string }[];
-  appliedModifiers: { cellIndex: number; modifierId: string }[];
-  scoreX: number;
-  scoreO: number;
-}
-
-const STORAGE_KEY = "lastmile:aaa-tic-tac:GameState";
-
-const DEFAULT_STATE: GameState = {
-  phase: "lobby",
-  board: Array(9).fill(null),
-  currentPlayer: "X",
-  winner: null,
-  draw: false,
-  queueTime: 0,
-  opponentRank: "Diamond III",
-  opponentAvatar: "🤖",
-  modifiers: [],
-  appliedModifiers: [],
-  scoreX: 0,
-  scoreO: 0,
+type GameState = {
+  board: string[] | null[];
+  currentPlayer: 'X' | 'O';
+  phase: 'idle' | 'queue' | 'playing' | 'victory' | 'draw';
+  winner: 'X' | 'O' | null;
+  winningCells: number[];
+  settings: { skin: 'classic' | 'neon' | 'monochrome' };
+  score: { x: number; o: number };
 };
 
-const WINNING_LINES: number[][] = [
+const STORAGE_KEY = "lastmile:aaa-tic-tac:gameState";
+
+const INITIAL_STATE: GameState = {
+  board: Array(9).fill(null),
+  currentPlayer: 'X',
+  phase: 'idle',
+  winner: null,
+  winningCells: [],
+  settings: { skin: 'classic' },
+  score: { x: 0, o: 0 },
+};
+
+const WIN_LINES = [
   [0, 1, 2], [3, 4, 5], [6, 7, 8],
   [0, 3, 6], [1, 4, 7], [2, 5, 8],
   [0, 4, 8], [2, 4, 6]
 ];
 
-const MODIFIER_OPTIONS = [
-  { id: "swap", label: "Swap Positions", description: "Exchange your piece with an opponent's random piece" },
-  { id: "freeze", label: "Freeze Cell", description: "Lock this cell — no further modifications allowed" },
-  { id: "double", label: "Double Points", description: "This win counts as 2 points" },
-  { id: "steal", label: "Cell Steal", description: "Take over one opponent's existing piece" },
-];
-
-function checkWinner(board: Board): Player | null {
-  for (const [a, b, c] of WINNING_LINES) {
+const checkWinCondition = (board: string[]): { winner: 'X' | 'O' | null; cells: number[] } => {
+  for (const [a, b, c] of WIN_LINES) {
     if (board[a] && board[a] === board[b] && board[a] === board[c]) {
-      return board[a];
+      return { winner: board[a], cells: [a, b, c] };
     }
   }
-  return null;
-}
+  return { winner: null, cells: [] };
+};
 
-export default function AAA_TicTacToe() {
-  const [gameState, setGameState] = useState<GameState>(() => {
-    try {
-      const saved = readLocal<GameState>(STORAGE_KEY, DEFAULT_STATE);
-      if (saved) return saved;
-    } catch {}
-    return DEFAULT_STATE;
-  });
+const usePersistedGame = () => {
+  const [state, setState] = useState<GameState>(INITIAL_STATE);
 
   useEffect(() => {
     try {
-      writeLocal(STORAGE_KEY, gameState);
-    } catch {}
-  }, [gameState]);
-
-  useEffect(() => {
-    if (gameState.phase !== "queue") return;
-    const interval = setInterval(() => {
-      setGameState(prev => {
-        const newTime = prev.queueTime + 1000;
-        if (newTime >= 3000) {
-          return { ...prev, phase: "matched", queueTime: 3000 };
-        }
-        return { ...prev, queueTime: newTime };
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [gameState.phase]);
-
-  useEffect(() => {
-    if (gameState.phase !== "playing") return;
-    const winner = checkWinner(gameState.board);
-    if (winner) {
-      setGameState(prev => ({
-        ...prev,
-        phase: "result",
-        winner,
-        scoreX: winner === "X" ? prev.scoreX + 1 : prev.scoreX,
-        scoreO: winner === "O" ? prev.scoreO + 1 : prev.scoreO,
-      }));
-    } else if (gameState.board.every(cell => cell !== null)) {
-      setTimeout(() => {
-        setGameState(prev => ({ ...prev, phase: "draw", draw: true }));
-      }, 1000);
+      const saved = readLocal<GameState>(STORAGE_KEY, INITIAL_STATE);
+      setState(saved);
+    } catch {
+      setState(INITIAL_STATE);
     }
-  }, [gameState.board, gameState.phase]);
+  }, []);
+
+  useEffect(() => {
+    try {
+      writeLocal(STORAGE_KEY, state);
+    } catch {
+      console.error('Persistence write failed');
+    }
+  }, [state]);
+
+  return [state, setState] as const;
+};
+
+export const HUD = ({ opponent }: { opponent: string }) => (
+  <div className="flex items-center gap-3 px-4 py-2 bg-[#14171c] border-b border-[#4f8cff]/20">
+    <Badge tone="brand">LIVE</Badge>
+    <span className="font-mono text-[#e6e9ef] text-sm tracking-wide">Opponent: {opponent}</span>
+  </div>
+);
+
+export const ScorePanel = ({ score }: { score: { x: number; o: number } }) => (
+  <Card className="p-4 bg-[#14171c] border border-[#4f8cff]/10 flex justify-between items-center">
+    <div className="text-center">
+      <div className="font-mono text-2xl text-[#4f8cff]">{score.x}</div>
+      <div className="text-xs text-[#e6e9ef]/60 uppercase tracking-wider">Player X</div>
+    </div>
+    <div className="h-8 w-px bg-[#4f8cff]/20"></div>
+    <div className="text-center">
+      <div className="font-mono text-2xl text-[#e6e9ef]/80">{score.o}</div>
+      <div className="text-xs text-[#e6e9ef]/60 uppercase tracking-wider">CPU O</div>
+    </div>
+  </Card>
+);
+
+export const MatchmakingOverlay = ({ onStart }: { onStart: () => void }) => {
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setProgress(prev => {
+        const next = prev + 2;
+        if (next >= 100) {
+          clearInterval(interval);
+          setTimeout(onStart, 200);
+          return 100;
+        }
+        return next;
+      });
+    }, 40);
+    return () => clearInterval(interval);
+  }, [onStart]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b0d10]/90 backdrop-blur-sm">
+      <Card className="w-full max-w-md p-6 bg-[#14171c] border border-[#4f8cff]/20">
+        <div className="mb-4 flex items-center justify-between">
+          <span className="font-mono text-[#e6e9ef] text-sm">SEARCHING OPPONENT...</span>
+          <span className="font-mono text-[#4f8cff] text-sm">{Math.round(progress)}%</span>
+        </div>
+        <div className="h-2 w-full bg-[#0b0d10] rounded overflow-hidden">
+          <div 
+            className="h-full bg-[#4f8cff] transition-all duration-100 ease-linear"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className="mt-4 text-xs text-[#e6e9ef]/50 font-mono">Estimating latency & matching skill tier...</p>
+      </Card>
+    </div>
+  );
+};
+
+export const ResultModal = ({ 
+  phase, 
+  winner, 
+  winningCells, 
+  onPlayAgain 
+}: { 
+  phase: 'victory' | 'draw'; 
+  winner: 'X' | 'O' | null; 
+  winningCells: number[]; 
+  onPlayAgain: () => void; 
+}) => {
+  const isVictory = phase === 'victory';
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#0b0d10]/95 backdrop-blur-md">
+      <Card className="w-full max-w-sm p-8 bg-[#14171c] border border-[#4f8cff]/20 text-center">
+        <div className="mb-4">
+          {isVictory ? (
+            <Badge tone="pass">VICTORY</Badge>
+          ) : (
+            <Badge tone="warn">DRAW</Badge>
+          )}
+        </div>
+        <h2 className="font-mono text-xl text-[#e6e9ef] mb-2">
+          {isVictory ? `Player ${winner} Wins` : 'Board Full'}
+        </h2>
+        <p className="text-sm text-[#e6e9ef]/60 mb-6">
+          {isVictory ? 'Excellent execution. Resetting board.' : 'No remaining moves. Draw declared.'}
+        </p>
+        <Button variant="primary" size="md" onClick={onPlayAgain} className="w-full">
+          Play Again
+        </Button>
+      </Card>
+    </div>
+  );
+};
+
+export const GameBoard = ({ 
+  state, 
+  dispatch 
+}: { 
+  state: GameState; 
+  dispatch: React.Dispatch<React.Reducer<GameState, any>>; 
+}) => {
+  const skinStyles = {
+    classic: 'border-[#4f8cff]/30 bg-[#14171c]',
+    neon: 'border-[#4f8cff] bg-[#0b0d10] shadow-[0_0_10px_rgba(79,140,255,0.3)]',
+    monochrome: 'border-[#e6e9ef]/20 bg-[#14171c]'
+  }[state.settings.skin];
+
+  const handleCellClick = useCallback((index: number) => {
+    if (state.phase !== 'playing' || state.board[index] !== null) return;
+
+    dispatch({
+      type: 'PLACE',
+      payload: { index, player: state.currentPlayer }
+    });
+  }, [state.phase, state.board, state.currentPlayer, dispatch]);
+
+  const handleReset = useCallback(() => {
+    dispatch({ type: 'RESET_GAME' });
+  }, [dispatch]);
+
+  return (
+    <div className="relative">
+      <div className={`grid grid-cols-3 gap-2 p-2 rounded-lg ${skinStyles}`}>
+        {state.board.map((cell, idx) => {
+          const isWinning = state.winningCells.includes(idx);
+          const isOccupied = cell !== null;
+          return (
+            <button
+              key={idx}
+              onClick={() => handleCellClick(idx)}
+              disabled={state.phase !== 'playing' || isOccupied}
+              className={`
+                aspect-square flex items-center justify-center rounded-md transition-all duration-150
+                ${isOccupied ? 'cursor-not-allowed animate-[shake_0.3s_ease-in-out]' : 'hover:bg-[#4f8cff]/10 cursor-pointer'}
+                ${isWinning ? 'shadow-[0_0_15px_3px_rgba(255,215,0,0.6)] border-yellow-400 bg-[#14171c]' : ''}
+                ${!isOccupied && !isWinning ? 'border border-[#4f8cff]/10' : ''}
+              `}
+            >
+              {cell && (
+                <span className={`font-mono text-3xl font-bold ${cell === 'X' ? 'text-[#4f8cff]' : 'text-[#e6e9ef]'}`}>
+                  {cell}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      {state.phase === 'playing' && (
+        <div className="absolute -bottom-8 left-0 right-0 text-center">
+          <span className="font-mono text-xs text-[#e6e9ef]/50">
+            TURN: <span className="text-[#4f8cff]">{state.currentPlayer}</span>
+          </span>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const SettingsWidget = ({ 
+  settings, 
+  onChange 
+}: { 
+  settings: { skin: 'classic' | 'neon' | 'monochrome' }; 
+  onChange: (skin: 'classic' | 'neon' | 'monochrome') => void; 
+}) => {
+  const skins: { value: 'classic' | 'neon' | 'monochrome'; label: string }[] = [
+    { value: 'classic', label: 'Classic Grid' },
+    { value: 'neon', label: 'Neon Glow' },
+    { value: 'monochrome', label: 'Monochrome' }
+  ];
+
+  return (
+    <Card className="p-4 bg-[#14171c] border border-[#4f8cff]/10">
+      <label className="block text-xs font-mono text-[#e6e9ef]/60 mb-2 uppercase tracking-wider">
+        Board Skin
+      </label>
+      <select
+        value={settings.skin}
+        onChange={(e) => onChange(e.target.value as 'classic' | 'neon' | 'monochrome')}
+        className="w-full bg-[#0b0d10] border border-[#4f8cff]/20 rounded px-3 py-2 text-[#e6e9ef] font-mono text-sm focus:outline-none focus:border-[#4f8cff]"
+      >
+        {skins.map(s => (
+          <option key={s.value} value={s.value}>{s.label}</option>
+        ))}
+      </select>
+    </Card>
+  );
+};
+
+export const MoveHistory = ({ history }: { history: RecordItem[] }) => (
+  <Card className="p-4 bg-[#14171c] border border-[#4f8cff]/10 h-64 flex flex-col">
+    <h3 className="font-mono text-sm text-[#e6e9ef] mb-3 uppercase tracking-wider">Match Log</h3>
+    <div className="flex-1 overflow-y-auto pr-2 space-y-2">
+      {history.length === 0 ? (
+        <EmptyState 
+          title="No Moves Recorded" 
+          message="Place your first mark to begin logging." 
+          className="py-8"
+        />
+      ) : (
+        history.map(item => (
+          <ListRow 
+            key={item.id} 
+            title={item.title} 
+            subtitle={item.notes} 
+            trailing={<span className="font-mono text-xs text-[#4f8cff]">{item.createdAt}</span>}
+            className="border-b border-[#4f8cff]/10 pb-2 last:border-0"
+          />
+        ))
+      )}
+    </div>
+  </Card>
+);
+
+export default function TripleATicTacToeWidgets() {
+  const [state, dispatch] = React.useReducer(
+    (prev: GameState, action: any): GameState => {
+      switch (action.type) {
+        case 'START_QUEUE':
+          return { ...prev, phase: 'queue' };
+        case 'START_PLAYING':
+          return { ...prev, phase: 'playing', board: Array(9).fill(null) };
+        case 'PLACE': {
+          const { index, player } = action.payload;
+          const newBoard = [...prev.board];
+          newBoard[index] = player;
+          const result = checkWinCondition(newBoard);
+          const nextPlayer = player === 'X' ? 'O' : 'X';
+          let newPhase = prev.phase;
+          let newWinner = prev.winner;
+          let newWinningCells = prev.winningCells;
+          let newScore = { ...prev.score };
+
+          if (result.winner) {
+            newPhase = 'victory';
+            newWinner = result.winner;
+            newWinningCells = result.cells;
+            newScore[result.winner.toLowerCase() as 'x' | 'o'] += 1;
+          } else if (!newBoard.includes(null)) {
+            newPhase = 'draw';
+          }
+
+          return {
+            ...prev,
+            board: newBoard,
+            currentPlayer: newPhase === 'playing' ? nextPlayer : prev.currentPlayer,
+            phase: newPhase,
+            winner: newWinner,
+            winningCells: newWinningCells,
+            score: newScore
+          };
+        }
+        case 'RESET_GAME':
+          return { ...prev, board: Array(9).fill(null), phase: 'idle', winner: null, winningCells: [], currentPlayer: 'X' };
+        case 'UPDATE_SETTINGS':
+          return { ...prev, settings: { ...prev.settings, skin: action.skin } };
+        default:
+          return prev;
+      }
+    },
+    INITIAL_STATE
+  );
 
   const handleFindMatch = () => {
-    setGameState(prev => ({ ...prev, phase: "queue", queueTime: 0 }));
+    dispatch({ type: 'START_QUEUE' });
   };
 
-  const handleCellClick = (index: number) => {
-    if (gameState.phase !== "playing") return;
-    if (gameState.board[index] !== null) return;
-
-    const newBoard = [...gameState.board];
-    newBoard[index] = gameState.currentPlayer;
-
-    setGameState(prev => ({
-      ...prev,
-      board: newBoard,
-      currentPlayer: prev.currentPlayer === "X" ? "O" : "X",
-      modifiers: MODIFIER_OPTIONS.slice(0, 2),
-    }));
+  const handleQueueComplete = () => {
+    dispatch({ type: 'START_PLAYING' });
   };
 
-  const handleApplyModifier = (modifierId: string) => {
-    setGameState(prev => ({
-      ...prev,
-      modifiers: [],
-      appliedModifiers: [...prev.appliedModifiers, { cellIndex: 0, modifierId }],
-    }));
+  const handleSkinChange = (skin: 'classic' | 'neon' | 'monochrome') => {
+    dispatch({ type: 'UPDATE_SETTINGS', skin });
   };
 
   const handlePlayAgain = () => {
-    setGameState(prev => ({
-      ...prev,
-      phase: "lobby",
-      board: Array(9).fill(null),
-      currentPlayer: "X",
-      winner: null,
-      draw: false,
-      queueTime: 0,
-      modifiers: [],
-      appliedModifiers: [],
-    }));
+    dispatch({ type: 'RESET_GAME' });
   };
 
-  switch (gameState.phase) {
-    case "lobby":
-      return (
-        <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] font-sans">
-          <div className="max-w-lg mx-auto p-6">
-            <h1 className="text-2xl font-bold mb-8 font-mono">AAA TIC TAC TOE</h1>
-            <Card className="p-6 mb-6">
-              <EmptyState
-                title="No Active Match"
-                message="Ready to find an opponent?"
-                description="Click below to enter the matchmaking queue"
-                icon="⚔️"
-              />
-            </Card>
-            <Button
-              id="find-match-btn"
-              variant="primary"
-              size="lg"
-              onClick={handleFindMatch}
-              className="w-full"
-            >
-              Find Match
-            </Button>
-            <div className="mt-6 flex justify-between text-sm font-mono text-gray-500">
-              <span>Wins: X {gameState.scoreX}</span>
-              <span>O {gameState.scoreO}</span>
-            </div>
-          </div>
-        </div>
-      );
+  const mockHistory: RecordItem[] = [];
 
-    case "queue":
-      return (
-        <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] font-sans">
-          <div className="max-w-lg mx-auto p-6">
-            <div className="text-center mb-8">
-              <Badge tone="brand" className="mb-4">QUEUEING</Badge>
-              <h2 className="text-xl font-mono mb-2">Finding Opponent...</h2>
-              <p className="text-gray-400 font-mono">{Math.min(gameState.queueTime, 3000)}ms / 3000ms</p>
-            </div>
-            <div className="flex justify-center">
-              <div className="animate-pulse w-16 h-16 rounded-full bg-[#4f8cff]/20 border border-[#4f8cff]/40"></div>
-            </div>
-          </div>
-        </div>
-      );
+  return (
+    <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] p-6 font-sans">
+      <style>{`
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          25% { transform: translateX(-4px); }
+          75% { transform: translateX(4px); }
+        }
+      `}</style>
 
-    case "matched":
-      return (
-        <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] font-sans">
-          <div className="max-w-lg mx-auto p-6">
-            <div className="text-center mb-8">
-              <Badge tone="pass" className="mb-4">MATCH FOUND</Badge>
-              <h2 className="text-xl font-mono mb-4">Opponent Identified</h2>
-              <div className="flex items-center justify-center gap-4 mb-4">
-                <div className="text-4xl">{gameState.opponentAvatar}</div>
-                <div>
-                  <div className="font-mono text-[#4f8cff]">{gameState.opponentRank}</div>
-                  <div className="text-sm text-gray-400">Ranked Player</div>
-                </div>
-              </div>
-            </div>
-            <Button
-              variant="primary"
-              size="lg"
-              onClick={() => setGameState(prev => ({ ...prev, phase: "playing" }))}
-              className="w-full"
-            >
-              Start Game
-            </Button>
-          </div>
-        </div>
-      );
+      <div className="max-w-4xl mx-auto space-y-6">
+        <header className="flex items-center justify-between border-b border-[#4f8cff]/20 pb-4">
+          <h1 className="font-mono text-xl tracking-tight text-[#e6e9ef]">TRIPLEA TIC-TAC-TOE</h1>
+          <Badge tone="neutral">v1.0.0</Badge>
+        </header>
 
-    case "playing":
-      return (
-        <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] font-sans">
-          <div className="max-w-lg mx-auto p-6">
-            <div className={`action-bar mb-6 ${gameState.currentPlayer === "X" ? "current-player-x" : "current-player-o"} font-mono text-center p-3 bg-[#14171c] rounded-lg border border-[#4f8cff]/20`}>
-              <span className="text-[#4f8cff]">Current Player: {gameState.currentPlayer}</span>
-            </div>
-
-            <div className="flex justify-between mb-6 font-mono text-sm">
-              <span>X: {gameState.scoreX}</span>
-              <span>O: {gameState.scoreO}</span>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 mb-6">
-              {gameState.board.map((cell, index) => (
-                <button
-                  key={index}
-                  data-empty={!cell}
-                  data-filled={!!cell}
-                  className={`cell aspect-square bg-[#14171c] border border-[#4f8cff]/20 rounded-lg flex items-center justify-center text-3xl font-mono hover:bg-[#14171c]/80 transition-colors ${cell === "X" ? "piece-x text-[#4f8cff]" : cell === "O" ? "piece-o text-red-400" : ""}`}
-                  onClick={() => handleCellClick(index)}
-                >
-                  {cell || ""}
-                </button>
-              ))}
-            </div>
-
-            {gameState.modifiers.length > 0 && (
-              <div className="modifier-panel bg-[#14171c] p-4 rounded-lg border border-[#4f8cff]/20 animate-slide-in">
-                <h3 className="font-mono text-sm mb-3 text-[#4f8cff]">Select Modifier</h3>
-                <div className="space-y-2">
-                  {gameState.modifiers.map(mod => (
-                    <button
-                      key={mod.id}
-                      className="apply-modifier w-full text-left p-3 bg-[#0b0d10] rounded border border-[#4f8cff]/10 hover:border-[#4f8cff]/40 transition-colors"
-                      onClick={() => handleApplyModifier(mod.id)}
-                    >
-                      <div className="font-mono text-sm text-[#e6e9ef]">{mod.label}</div>
-                      <div className="text-xs text-gray-400">{mod.description}</div>
-                    </button>
-                  ))}
-                </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="md:col-span-2 space-y-4">
+            <HUD opponent="CPU_α" />
+            <ScorePanel score={state.score} />
+            
+            {state.phase === 'idle' && (
+              <div className="flex justify-center py-8">
+                <Button variant="primary" size="lg" onClick={handleFindMatch}>
+                  Find Match
+                </Button>
               </div>
             )}
+
+            {(state.phase === 'queue' || state.phase === 'playing' || state.phase === 'victory' || state.phase === 'draw') && (
+              <GameBoard state={state} dispatch={dispatch} />
+            )}
+
+            {state.phase === 'queue' && (
+              <MatchmakingOverlay onStart={handleQueueComplete} />
+            )}
+
+            {(state.phase === 'victory' || state.phase === 'draw') && (
+              <ResultModal 
+                phase={state.phase} 
+                winner={state.winner} 
+                winningCells={state.winningCells} 
+                onPlayAgain={handlePlayAgain} 
+              />
+            )}
+          </div>
+
+          <div className="space-y-6">
+            <SettingsWidget settings={state.settings} onChange={handleSkinChange} />
+            <MoveHistory history={mockHistory} />
           </div>
         </div>
-      );
-
-    case "result":
-      return (
-        <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] font-sans">
-          <div className="max-w-lg mx-auto p-6">
-            <div className="result-screen opacity-1 transition-opacity duration-500 text-center">
-              <Badge tone={gameState.winner === "X" ? "pass" : "warn"} className="mb-4">GAME OVER</Badge>
-              <h2 className="winner-text text-3xl font-mono mb-2">
-                {gameState.winner} Wins!
-              </h2>
-              <p className="text-gray-400 mb-6">Congratulations on the victory</p>
-              <Button
-                id="play-again-btn"
-                variant="primary"
-                size="lg"
-                onClick={handlePlayAgain}
-                className="w-full"
-              >
-                Play Again
-              </Button>
-            </div>
-          </div>
-        </div>
-      );
-
-    case "draw":
-      return (
-        <div className="min-h-screen bg-[#0b0d10] text-[#e6e9ef] font-sans">
-          <div className="max-w-lg mx-auto p-6">
-            <div className="draw-screen text-center">
-              <Badge tone="neutral" className="mb-4">DRAW</Badge>
-              <h2 className="text-2xl font-mono mb-2">Stalemate</h2>
-              <p className="text-gray-400 mb-6">No winner this round</p>
-              <Button
-                variant="primary"
-                size="lg"
-                onClick={handlePlayAgain}
-                className="w-full"
-              >
-                Play Again
-              </Button>
-            </div>
-          </div>
-        </div>
-      );
-
-    default:
-      return null;
-  }
+      </div>
+    </div>
+  );
 }
