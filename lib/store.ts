@@ -29,28 +29,28 @@ const STORAGE_KEYS = {
   match_history: 'aaa_xo_match_history',
 };
 
+function getFromStorage<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function useStore() {
-  const [profile, setProfile] = useState<Profile>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.profile);
-    return saved ? JSON.parse(saved) : {
-      id: crypto.randomUUID(),
-      member_id: '',
-      points_balance: 0,
-      tier: 'Bronze',
-      equipped_theme_id: null,
-      created_at: new Date().toISOString(),
-    };
-  });
+  const [profile, setProfile] = useState<Profile>(() => getFromStorage(STORAGE_KEYS.profile, {
+    id: crypto.randomUUID(),
+    member_id: '',
+    points_balance: 0,
+    tier: 'Bronze',
+    equipped_theme_id: null,
+    created_at: new Date().toISOString(),
+  }));
 
-  const [unlockedThemes, setUnlockedThemes] = useState<UnlockedTheme[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.unlocked_themes);
-    return saved ? JSON.parse(saved) : [];
-  });
-
-  const [matchHistory, setMatchHistory] = useState<MatchHistory[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.match_history);
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [unlockedThemes, setUnlockedThemes] = useState<UnlockedTheme[]>(() => getFromStorage(STORAGE_KEYS.unlocked_themes, []));
+  const [matchHistory, setMatchHistory] = useState<MatchHistory[]>(() => getFromStorage(STORAGE_KEYS.match_history, []));
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(profile));
