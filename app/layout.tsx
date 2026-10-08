@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AAA Roadside XO",
-  description: "A polished, free-to-play AAA-branded tic-tac-toe game that leverages the AAA membership base for casual entertainment and brand engagement.",
+  title: "Triad Arena",
+  description: "A high-production-value, cross-platform 3D puzzle game that expands classic tic-tac-toe mechanics with competitive multiplayer ladders and dynamic game variants.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
