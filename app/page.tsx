@@ -10,6 +10,7 @@ export default function TriadArenaLanding() {
   const [variant, setVariant] = useState<"3x3" | "9x9">("3x3");
 
   const startMatchmaking = () => {
+    sessionStorage.setItem("triad_variant", variant);
     router.push("/matchmaking");
   };
 
@@ -30,7 +31,7 @@ export default function TriadArenaLanding() {
             Enter the arena. Opponents are simulated with randomized decision trees to prevent solved draws.
           </p>
           <Button variant="primary" size="lg" className="w-full" onClick={startMatchmaking}>
-            Start Match
+            Quick Match
           </Button>
         </Card>
 
@@ -51,8 +52,8 @@ export default function TriadArenaLanding() {
             </select>
           </div>
           <div className="pt-2 border-t border-[#1f2329]">
-            <Link href="/skins">
-              <Button variant="outline" size="md" className="w-full">
+            <Link href="/skins" className="block w-full">
+              <Button variant="outline" size="md">
                 Open Skin Shop
               </Button>
             </Link>

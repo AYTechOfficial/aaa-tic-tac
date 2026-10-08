@@ -41,6 +41,16 @@ export default function GamePage() {
         console.error("Failed to parse game state", e);
       }
     }
+    
+    const sessionVariant = sessionStorage.getItem("triad_variant");
+    if (sessionVariant && !saved) {
+      const newVariant = sessionVariant as "3x3" | "9x9";
+      setVariant(newVariant);
+      setBoardSize(newVariant === "3x3" ? 9 : 81);
+      setBoard(Array(newVariant === "3x3" ? 9 : 81).fill(null));
+      sessionStorage.removeItem("triad_variant");
+    }
+
     const skin = localStorage.getItem(SKIN_KEY);
     if (skin) setSkinClass(skin);
     setIsLoading(false);
@@ -104,8 +114,8 @@ export default function GamePage() {
     }
 
     for (const line of lines) {
-      const [a, b, c] = line;
-      if (currentBoard[a] && currentBoard[a] === currentBoard[b] && currentBoard[a] === currentBoard[c]) {
+      const [a, b, d] = line;
+      if (currentBoard[a] && currentBoard[a] === currentBoard[b] && currentBoard[a] === currentBoard[d]) {
         return { winner: currentBoard[a], line };
       }
     }
@@ -227,24 +237,33 @@ export default function GamePage() {
               variant === "3x3" ? "grid-cols-3" : "grid-cols-9"
             }`}
           >
-            {board.map((cell, idx) => {
-              const isWinning = winningLine.includes(idx);
+            {Array.from({ length: cols }).map((_, r) => {
+              const rowIndices = Array.from({ length: cols }, (_, c) => r * cols + c);
+              const isWinningRow = winningLine.some(idx => Math.floor(idx / cols) === r);
               return (
-                <button
-                  key={idx}
-                  ref={(el) => { cellRefs.current[idx] = el; }}
-                  onClick={() => handleCellClick(idx)}
-                  disabled={!!winner || !!isDraw || !!cell}
-                  className={`
-                    relative flex items-center justify-center text-2xl md:text-4xl font-mono rounded-lg border transition-all duration-200
-                    ${cell ? "cell-occupied bg-[#0b0d10] border-gray-700" : "bg-[#14171c] border-gray-800 hover:border-[#4f8cff] cursor-pointer"}
-                    ${isWinning ? "animate-pulse ring-4 ring-[#4f8cff]" : ""}
-                    ${!cell && !winner && !isDraw ? "hover:bg-gray-800/50" : ""}
-                  `}
-                  aria-label={`Cell ${idx}`}
-                >
-                  {cell && <span className={`${cell === "X" ? "text-[#4f8cff]" : "text-[#e6e9ef]"}`}>{cell}</span>}
-                </button>
+                <div key={r} className={`flex gap-2 ${isWinningRow ? "animate-pulse" : ""}`}>
+                  {rowIndices.map((idx) => {
+                    const cell = board[idx];
+                    const isWinning = winningLine.includes(idx);
+                    return (
+                      <button
+                        key={idx}
+                        ref={(el) => { cellRefs.current[idx] = el; }}
+                        onClick={() => handleCellClick(idx)}
+                        disabled={!!winner || !!isDraw || !!cell}
+                        className={`
+                          relative flex items-center justify-center text-2xl md:text-4xl font-mono rounded-lg border transition-all duration-200 flex-1
+                          ${cell ? "cell-occupied bg-[#0b0d10] border-gray-700" : "bg-[#14171c] border-gray-800 hover:border-[#4f8cff] cursor-pointer"}
+                          ${isWinning ? "ring-4 ring-[#4f8cff]" : ""}
+                          ${!cell && !winner && !isDraw ? "hover:bg-gray-800/50" : ""}
+                        `}
+                        aria-label={`Cell ${idx}`}
+                      >
+                        {cell && <span className={`${cell === "X" ? "text-[#4f8cff]" : "text-[#e6e9ef]"}`}>{cell}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               );
             })}
           </div>
